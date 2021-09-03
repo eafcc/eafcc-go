@@ -15,6 +15,9 @@ const eafcc_Context *new_context(const char *val);
 
 void free_context(eafcc_Context *ctx);
 
-eafcc_ConfigValue *get_config(const eafcc_CFGCenter *cc, const eafcc_Context *ctx, char *key);
+eafcc_ConfigValue *get_config(const eafcc_CFGCenter *cc,
+                              const eafcc_Context *ctx,
+                              char **keys,
+                              uintptr_t key_cnt);
 
-void free_config_value(eafcc_ConfigValue *v);
+void free_config_value(eafcc_ConfigValue *v, uintptr_t n);
