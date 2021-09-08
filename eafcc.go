@@ -1,4 +1,4 @@
-package main
+package eafcc
 
 import (
 	"fmt"
@@ -20,6 +20,7 @@ import (
 
 // #cgo amd64 386 CFLAGS: -DX86=1
 // #cgo LDFLAGS: -L${SRCDIR} -leafcc
+// #include <stdint.h>
 // #include <stdlib.h>
 // #include <stdbool.h>
 // #include <eafcc.h>
@@ -27,8 +28,7 @@ import (
 // typedef void (*eafcc_update_cb_fn)(void*, void*);
 import "C"
 
-type UpdateInfo struct{
-
+type UpdateInfo struct {
 }
 
 type CFGCenter struct {
@@ -52,15 +52,15 @@ type CFGValue struct {
 	Key         string
 	ContextType string
 	Value       string
-	Reason *CFGValueReason
+	Reason      *CFGValueReason
 }
 
 type CFGValueReason struct {
-	Pri float32
-	IsNeg bool
+	Pri      float32
+	IsNeg    bool
 	LinkPath string
 	RulePath string
-	ResPath string
+	ResPath  string
 }
 
 type eafccInstanceStorageForCGo struct {
@@ -250,11 +250,11 @@ func (c *CFGCenter) GetCfgRawNoCache(ccCtx *CFGContext, keys []string, viewMode 
 		if t.reason != nil {
 			r := (*C.eafcc_ConfigValueReason)(t.reason)
 			reason = &CFGValueReason{
-				Pri: float32(r.pri),
-				IsNeg: bool(r.is_neg),
+				Pri:      float32(r.pri),
+				IsNeg:    bool(r.is_neg),
 				RulePath: C.GoString(r.rule_path),
 				LinkPath: C.GoString(r.link_path),
-				ResPath: C.GoString(r.res_path),
+				ResPath:  C.GoString(r.res_path),
 			}
 		}
 
@@ -310,11 +310,11 @@ func test_raw_get() {
 	dir, _ := os.Getwd()
 	fmt.Println(dir)
 	cc := NewCfgCenter(`{
-		"storage_backend": {
-			"type": "filesystem",
-			"path": "../../test/mock_data/filesystem_backend/"
-		}
-	}`, nil, 1024*1024*1024, nil)
+                "storage_backend": {
+                        "type": "filesystem",
+                        "path": "../../test/mock_data/filesystem_backend/"
+                }
+        }`, nil, 1024*1024*1024, nil)
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
@@ -354,11 +354,11 @@ func test_cache_get() {
 	dir, _ := os.Getwd()
 	fmt.Println(dir)
 	cc := NewCfgCenter(`{
-		"storage_backend": {
-			"type": "filesystem",
-			"path": "../../test/mock_data/filesystem_backend/"
-		}
-	}`, nil, 1024*1024*1024, nil)
+                "storage_backend": {
+                        "type": "filesystem",
+                        "path": "../../test/mock_data/filesystem_backend/"
+                }
+        }`, nil, 1024*1024*1024, nil)
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
