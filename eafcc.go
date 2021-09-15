@@ -274,7 +274,7 @@ func (c *Namespace) NewWhoAmI(whoAmI string) *WhoAmI {
 
 func (c *WhoAmI) Free() {
 	if c.ctx != nil {
-		C.free_context((*C.eafcc_WhoAmI)(c.ctx))
+		C.free_whoami((*C.eafcc_WhoAmI)(c.ctx))
 	}
 }
 
