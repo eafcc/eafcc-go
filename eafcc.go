@@ -3,15 +3,12 @@ package eafcc
 import (
 	"fmt"
 	"hash"
-	"log"
 	"math/rand"
-	"net/http"
 	_ "net/http/pprof"
-	"os"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
 	"golang.org/x/crypto/blake2s"
@@ -91,6 +88,25 @@ const (
 	NotifyLevelNotifyWithMaybeChangedKeys = 3
 )
 
+type EAFCC_Error struct {
+	Msg string
+	Code int
+}
+
+func (e *EAFCC_Error) Error() string {
+	return e.Msg
+}
+
+func getLastErrorAsGoError() error {
+	cError := C.get_last_error()
+
+	t :=  &EAFCC_Error{}
+	if cError.msg != nil {
+		t.Msg = C.GoString(cError.msg)
+	}
+	return t
+}
+
 func (s *namespaceInstanceStorageForCGo) GetNewID() uint64 {
 	return atomic.AddUint64(&s.idGen, 1)
 }
@@ -124,22 +140,25 @@ func update_cb_go(differ unsafe.Pointer, userData unsafe.Pointer) {
 	}
 }
 
-func NewCfgCenter(cfg string) *CFGCenter {
+func NewCfgCenter(cfg string) (*CFGCenter, error) {
 	ccfg := C.CString(cfg)
 	defer C.free(unsafe.Pointer(ccfg))
 
 	ret := CFGCenter{}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	if handler := C.new_config_center_client(
 		ccfg,
 	); handler != nil {
 		ret.cc = unsafe.Pointer(handler)
-		return &ret
+		return &ret, nil
 	}
-	return nil
+	return nil, getLastErrorAsGoError()
 }
 
-func (cc *CFGCenter) CreateNamespace(namespace string, notifyLevel NotifyLevel, updateCB func(*Namespace, Differ), cacheSize int, cacheSalt []byte) *Namespace {
+func (cc *CFGCenter) CreateNamespace(namespace string, notifyLevel NotifyLevel, updateCB func(*Namespace, Differ), cacheSize int, cacheSalt []byte) (*Namespace, error) {
 	cnamespace := C.CString(namespace)
 	defer C.free(unsafe.Pointer(cnamespace))
 
@@ -162,6 +181,10 @@ func (cc *CFGCenter) CreateNamespace(namespace string, notifyLevel NotifyLevel, 
 	}
 
 	userdata := unsafe.Pointer(uintptr(namespaceInstanceStorageForCGoInst.GetNewID()))
+	
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	if handler := C.create_namespace(
 		(*C.eafcc_CFGCenter)(cc.cc),
 		cnamespace,
@@ -172,9 +195,9 @@ func (cc *CFGCenter) CreateNamespace(namespace string, notifyLevel NotifyLevel, 
 		ret.cc = unsafe.Pointer(handler)
 
 		namespaceInstanceStorageForCGoInst.Put(userdata, &ret)
-		return &ret
+		return &ret, nil
 	}
-	return nil
+	return nil, getLastErrorAsGoError()
 }
 
 func (c *Namespace) batchReadFromCache(whoami *WhoAmI, keys []string, viewMode CFGViewMode, needExplain bool) (values map[string][]*CFGValue, missingKeys []string, missingCacheKeysMap map[string]string) {
@@ -250,9 +273,16 @@ func (c *Namespace) GetCfgRawNoCache(whoami *WhoAmI, keys []string, viewMode CFG
 		return nil, err
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	t := C.get_config((*C.eafcc_NamespaceScopedCFGCenter)(c.cc), (*C.eafcc_WhoAmI)(whoami.ctx), (**C.char)(unsafe.Pointer(&ckeys[0])), C.ulong(len(keys)), cViewMode, C.uchar(cNeedExplain))
 	for _, ckey := range ckeys {
 		C.free(unsafe.Pointer(ckey))
+	}
+
+	if t == nil {
+		return nil, getLastErrorAsGoError()
 	}
 
 	return convertGetCFGOutput(t)
@@ -293,12 +323,15 @@ func convertGetCFGInput(whoami *WhoAmI, keys []string, viewMode CFGViewMode, nee
 	}
 
 	if whoami.ctx == nil {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
 		cctx := C.CString(whoami.raw)
 		defer C.free(unsafe.Pointer(cctx))
 		if handler := C.new_whoami(cctx); handler != nil {
 			whoami.ctx = unsafe.Pointer(handler)
 		} else {
-			return nil, 0, 0, fmt.Errorf("create whoami in C library got error")
+			return nil, 0, 0, getLastErrorAsGoError()
 		}
 	}
  
@@ -350,9 +383,16 @@ func (d *Differ) GetFromOld(whoami *WhoAmI, keys []string, viewMode CFGViewMode,
 		return nil, err
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	t := C.differ_get_from_old((*C.eafcc_Differ)(d.ptr), (*C.eafcc_WhoAmI)(whoami.ctx), (**C.char)(unsafe.Pointer(&ckeys[0])), C.ulong(len(keys)), cViewMode, C.uchar(cNeedExplain))
 	for _, ckey := range ckeys {
 		C.free(unsafe.Pointer(ckey))
+	}
+
+	if t == nil {
+		return nil, getLastErrorAsGoError()
 	}
 	return convertGetCFGOutput(t)
 }
@@ -363,10 +403,17 @@ func (d *Differ) GetFromNew(whoami *WhoAmI, keys []string, viewMode CFGViewMode,
 		return nil, err
 	}
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	
 	t := C.differ_get_from_new((*C.eafcc_Differ)(d.ptr), (*C.eafcc_WhoAmI)(whoami.ctx), (**C.char)(unsafe.Pointer(&ckeys[0])), C.ulong(len(keys)), cViewMode, C.uchar(cNeedExplain))
 	for _, ckey := range ckeys {
 		C.free(unsafe.Pointer(ckey))
 	}
+	if t == nil {
+		return nil, getLastErrorAsGoError()
+	}
+
 	return convertGetCFGOutput(t)
 }
 
@@ -387,115 +434,3 @@ func toBytes(str string) []byte {
 	}))
 }
 
-
-func test_update_cb(ns *Namespace, d Differ) {
-	ctx := ns.NewWhoAmI("foo=123\nbar=456")
-	values_new, _ := d.GetFromNew(ctx, []string{"my_key", "my_key", "my_key"}, CFGViewModeOverlaidView, false)
-	values_old, _ := d.GetFromOld(ctx, []string{"my_key", "my_key", "my_key"}, CFGViewModeOverlaidView, false)
-	ctx.Free()
-
-	fmt.Println("old", values_old["my_key"][0].Value)
-	fmt.Println("new", values_new["my_key"][0].Value)
-}
-
-
-func test_raw_get() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
-
-	dir, _ := os.Getwd()
-	fmt.Println(dir)
-	cc := NewCfgCenter(`{
-		"storage_backend": {
-			"type": "filesystem",
-			"path": "../../test/mock_data/filesystem_backend/"
-		}
-	}`)
-
-	ns := cc.CreateNamespace("/", NotifyLevelNotifyWithoutChangedKeysByGlobal, test_update_cb, 1024*1024*1024, nil)
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			defer wg.Done()
-
-			for x := 0; x < 60000; x++ {
-				ctx := ns.NewWhoAmI("foo=123\nbar=456")
-
-				values, err := ns.GetCfgRawNoCache(ctx, []string{"my_key", "my_key", "my_key"}, CFGViewModeOverlaidView, false)
-				ctx.Free()
-				if err != nil {
-					panic(err)
-				}
-
-				contextType, value := values["my_key"][0].ContextType, values["my_key"][0].Value
-				if contextType != "application/json" {
-					panic(contextType)
-				}
-				_ = value
-				// if value != `{"aaa":[{},{"bbb":"hahaha"}]}` {
-				// 	panic(contextType)
-				// }
-				time.Sleep(1 * time.Second)
-			}
-		}()
-	}
-
-	wg.Wait()
-	print("=fin")
-	// runtime.GC()
-	// time.Sleep(1000 * time.Hour)
-
-}
-
-func test_cache_get() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
-
-	dir, _ := os.Getwd()
-	fmt.Println(dir)
-	cc := NewCfgCenter(`{
-		"storage_backend": {
-			"type": "filesystem",
-			"path": "../../test/mock_data/filesystem_backend/"
-		}
-	}`)
-	ns := cc.CreateNamespace("/", NotifyLevelNotifyWithoutChangedKeysByGlobal, nil, 1024*1024*1024, nil)
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			defer wg.Done()
-
-			for x := 0; x < 60000000; x++ {
-				ctx := ns.NewWhoAmI("foo=123\nbar=456")
-
-				values, err := ns.GetCfg(ctx, []string{"my_key", "my_key", "my_key"}, CFGViewModeOverlaidView, false)
-				ctx.Free()
-				if err != nil {
-					panic(err)
-				}
-
-				contextType, value := values["my_key"][0].ContextType, values["my_key"][0].Value
-				if contextType != "application/json" {
-					panic(contextType)
-				}
-				if value != `{"aaa":[{},{"bbb":"hahaha"}]}` {
-					panic(contextType)
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-	print("=fin")
-	// runtime.GC()
-	// time.Sleep(1000 * time.Hour)
-}
-
-func main() {
-	test_raw_get()
-	// test_cache_get()
-}

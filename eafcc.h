@@ -40,6 +40,11 @@ typedef struct {
   eafcc_ConfigValue *ptr;
 } eafcc_ConfigValues;
 
+typedef struct {
+  const char *msg;
+  intptr_t code;
+} eafcc_EAFCCError;
+
 const eafcc_CFGCenter *new_config_center_client(const char *cfg);
 
 void free_config_center(eafcc_CFGCenter *cc);
@@ -78,3 +83,5 @@ eafcc_ConfigValues *differ_get_from_new(const eafcc_Differ *differ,
                                         uintptr_t key_cnt,
                                         eafcc_ViewMode view_mode,
                                         uint8_t need_explain);
+
+const eafcc_EAFCCError *get_last_error(void);
